@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+
+dockers = `docker ps --format "{{.Names}}:{{.ID}}"`.split("\n")
+if dockers.length > 0
+  # Hand array of tuples to Hash[]
+  opts = Hash[dockers.map{|d| d.split(':')}]
+  puts "Select an image to open bash:"
+  opts.keys.each.with_index { |k, i| puts "#{i + 1}) #{k}"}
+  print "> "
+  sel = gets.chomp.to_i
+  if sel != 0 && sha = opts.keys[sel - 1]
+    comm = "docker exec -it #{opts[sha]} /bin/bash"
+    exec(comm)
+  else
+    puts "invalid input"
+  end
+else
+  puts "no running Docker images found"
+end

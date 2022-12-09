@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+
+stashes = `git stash list`.split("\n")
+if stashes.length > 0
+  # Hand array of tuples to Hash[]
+  opts = Hash[stashes.map{|d| d.split(/}:/)}]
+  puts "select a stash to apply"
+  opts.keys.each.with_index { |k, i| puts "#{i + 1}) #{opts[k]}"}
+  print "> "
+  sel = gets.chomp.to_i
+  if sel != 0  
+    comm = "git stash apply stash@{#{sel - 1}}"
+    exec(comm)
+  else
+    puts "invalid input"
+  end
+else
+  puts "no stashes found"
+end

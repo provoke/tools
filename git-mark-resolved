@@ -1,0 +1,3 @@
+#!/bin/sh
+
+git status | egrep 'both (added:|modified:)' | sed -e 's/\#.both added:\ *//g' | sed -e 's/\#.both modified:\ *//g' | xargs -I{} sh -c "git add '{}'"
