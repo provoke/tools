@@ -1,0 +1,2 @@
+alias dx="docker"
+alias ll="ls -lah"
