@@ -1,19 +1,33 @@
-#!/usr/bin/env ruby
+#!/bin/bash
 
-dockers = `docker ps --format "{{.Names}}:{{.ID}}"`.split("\n")
-if dockers.length > 0
-  # Hand array of tuples to Hash[]
-  opts = Hash[dockers.map{|d| d.split(':')}]
-  puts "Select an image to open bash:"
-  opts.keys.each.with_index { |k, i| puts "#{i + 1}) #{k}"}
-  print "> "
-  sel = gets.chomp.to_i
-  if sel != 0 && sha = opts.keys[sel - 1]
-    comm = "docker exec -it #{opts[sha]} /bin/bash"
-    exec(comm)
+# Get the list of running Docker containers with their names and IDs
+dockers=$(docker ps --format "{{.Names}}:{{.ID}}")
+
+# Check if there are any running Docker containers
+if [ -n "$dockers" ]; then
+  # Convert the list into an array
+  IFS=$'\n' read -rd '' -a docker_array <<< "$dockers"
+  
+  # Display the list of containers for selection
+  echo "Select an image to open bash:"
+  for i in "${!docker_array[@]}"; do
+    name=$(echo "${docker_array[$i]}" | cut -d':' -f1)
+    echo "$((i + 1))) $name"
+  done
+
+  # Prompt the user to select a container
+  read -p "> " sel
+
+  # Validate the selection
+  if [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -gt 0 ] && [ "$sel" -le "${#docker_array[@]}" ]; then
+    selected_container="${docker_array[$((sel - 1))]}"
+    container_id=$(echo "$selected_container" | cut -d':' -f2)
+    
+    # Execute bash in the selected container
+    docker exec -it "$container_id" /bin/bash
   else
-    puts "invalid input"
-  end
+    echo "Invalid input"
+  fi
 else
-  puts "no running Docker images found"
-end
+  echo "No running Docker images found"
+fi
