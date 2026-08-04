@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Dump com_yes_substruct from the staging Aurora cluster.
+#
+# raw_track_play_instances and track_play_instances are dumped structure-only:
+# mysqldump can't mix "schema only for these, full for everything else" in one
+# invocation, so this is two passes appended to the same file.
+#
+# Credentials come from a defaults file (default ~/.my.cnf), mode 600:
+#
+#   [client]
+#   password=...
+#
+# Point elsewhere with DUMP_SUBSTRUCT_CNF=/path/to/file.
+
+HOST="yes-cluster.cluster-cdzearifvnm7.us-east-1.rds.amazonaws.com"
+USER="root"
+DB="com_yes_substruct"
+CNF="${DUMP_SUBSTRUCT_CNF:-$HOME/.my.cnf}"
+
+# tables to dump structure-only
+SCHEMA_ONLY=(raw_track_play_instances track_play_instances)
+
+usage() {
+  echo "usage: $(basename "$0") [-f] <output-file>" >&2
+  echo "  -f  overwrite <output-file> if it already exists" >&2
+  exit 1
+}
+
+force=0
+while getopts ':f' opt; do
+  case "$opt" in
+    f) force=1 ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+[ $# -eq 1 ] || usage
+OUTFILE="$1"
+
+#preflight
+if ! command -v mysqldump >/dev/null 2>&1; then
+  echo "error: mysqldump not on PATH" >&2
+  exit 1
+fi
+
+if [ -e "$OUTFILE" ] && [ "$force" -eq 0 ]; then
+  echo "error: $OUTFILE already exists (use -f to overwrite)" >&2
+  exit 1
+fi
+
+if [ ! -f "$CNF" ]; then
+  {
+    echo "error: credentials file $CNF not found"
+    echo
+    echo "create it with mode 600:"
+    echo
+    echo "  [client]"
+    echo "  password=..."
+  } >&2
+  exit 1
+fi
+
+#a dump password readable by anyone but the owner defeats the point
+perms=$(stat -c '%a' "$CNF" 2>/dev/null || stat -f '%Lp' "$CNF")
+if [ "${perms: -2}" != "00" ]; then
+  echo "error: $CNF is mode $perms, must not be group/world readable" >&2
+  echo "  chmod 600 $CNF" >&2
+  exit 1
+fi
+
+echo "using $(mysqldump --version)" >&2
+
+DUMP=(mysqldump "--defaults-extra-file=$CNF" -h"$HOST" -u"$USER" --single-transaction)
+
+#MySQL 8 clients send --column-statistics by default and Aurora/5.7 rejects it
+if mysqldump --help 2>/dev/null | grep -q -- '--column-statistics'; then
+  DUMP+=(--column-statistics=0)
+fi
+
+#--ignore-table needs db.table, one table per flag
+IGNORE_FLAGS=()
+for t in "${SCHEMA_ONLY[@]}"; do
+  IGNORE_FLAGS+=(--ignore-table="${DB}.${t}")
+done
+
+#build in a temp file alongside the target, so a failed second pass can't
+#leave a truncated dump sitting there looking complete
+tmpout=$(mktemp "${OUTFILE}.XXXXXX")
+trap 'rm -f "$tmpout"' EXIT
+
+echo "dumping ${DB} (excluding ${SCHEMA_ONLY[*]})..." >&2
+"${DUMP[@]}" "${IGNORE_FLAGS[@]}" "$DB" > "$tmpout"
+
+echo "appending structure for ${SCHEMA_ONLY[*]}..." >&2
+"${DUMP[@]}" --no-data "$DB" "${SCHEMA_ONLY[@]}" >> "$tmpout"
+
+mv "$tmpout" "$OUTFILE"
+trap - EXIT
+
+echo "done: $OUTFILE ($(du -h "$OUTFILE" | cut -f1))" >&2
